@@ -60,13 +60,14 @@ outputV =outputV/torch.std(outputV)
 nNin   = 13
 nopen  = 32
 nhid   = 32
+nclose = 1
 nlayer = 18
-model = utils.resNet(nNin,nopen,nhid,nlayer)
+model = utils.resNet(nNin,nopen,nhid,nclose,nlayer)
 
 total_params = sum(p.numel() for p in model.parameters())
 print('Number of parameters ', total_params)
 
-score = model(input)
+score = model(input).mean(dim=1)
 
 ## Start optimization
 lrK = 1.0e-4
@@ -95,7 +96,7 @@ for j in range(epochs):
         input, Mask = utils.getBatchData(X[b:b+bs], E[b:b+bs], C[b:b+bs])
         scoreObs   = output[b:b+bs]
         optimizer.zero_grad()
-        score = model(input, Mask)
+        score = model(input, Mask).mean(dim=1)
         loss  = F.mse_loss(score,scoreObs)
         loss.backward()
         nk = torch.norm(model.K.grad).item()
