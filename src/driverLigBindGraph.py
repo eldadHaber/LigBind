@@ -17,41 +17,96 @@ device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 lig = torch.load('../sampleData/training_ligand_score.pt')
 pro = torch.load('../sampleData/training_pocket_score.pt')
 
-def getLigData(lig,i):
-    I = (lig['bonds'][i][:,0]-1).long()
-    J = (lig['bonds'][i][:,1]-1).long()
+def getLigData(lig,IND):
 
-    #xe = torch.tensor(lig['bonds'][i][:,2], dtype=torch.long)
-    xe = lig['bonds'][i][:, 2].long()
-    xe = F.one_hot(xe,8)
-    xe = xe.t().unsqueeze(0)
+    n = len(IND)
+    II = torch.zeros(0)
+    JJ = torch.zeros(0)
+    XE = torch.zeros(0,8)
+    XN = torch.zeros(0,55)
+    NL = torch.zeros(n, dtype=torch.long)
+    cnt = 0
+    for j in range(n):
 
-    xn = lig['atom_types'][i]
-    cn = lig['charge'][i].unsqueeze(1)
+        i = IND[j]
+        I = (lig['bonds'][i][:,0]-1).long()
+        J = (lig['bonds'][i][:,1]-1).long()
+        II = torch.cat((II,I+cnt))
+        JJ = torch.cat((JJ,J+cnt))
 
-    xn = torch.cat((xn,50*cn),dim=1)
-    xn = xn.t().unsqueeze(0)
+        #xe = torch.tensor(lig['bonds'][i][:,2], dtype=torch.long)
+        xe = lig['bonds'][i][:, 2].long()
+        xe = F.one_hot(xe,8)
+        XE = torch.cat((XE,xe),dim=0)
 
-    return I, J, xn, xe.float()
+        xn = lig['atom_types'][i]
+        cn = lig['charge'][i].unsqueeze(1)
 
-def getPocketData(P,i):
+        xn = torch.cat((xn,50*cn),dim=1)
+        XN = torch.cat((XN, xn), dim=0)
+        NL[j] = xn.shape[0]
+        cnt = cnt + xn.shape[0]
 
-    score = torch.tensor([float(P['scores'][i])])
+    XE = XE.t().unsqueeze(0)
+    XN = XN.t().unsqueeze(0)
 
-    X = P['coords'][i]
-    D = utils.distanceMap(X)
-    D = torch.exp(-D/torch.max(D))
-    D[D<0.9] = 0
-    I, J = torch.nonzero(D,  as_tuple=True)
+    return II, JJ, XN, XE.float(), NL
 
-    xn = P['atom_types'][i]
-    xn = xn.t()
+def getPocketData(P,IND):
 
-    xe = D[I, J]
-    return I, J, xn.unsqueeze(0), xe.unsqueeze(0).unsqueeze(0), score
+    n = len(IND)
+    II = torch.zeros(0)
+    JJ = torch.zeros(0)
+    XE = torch.zeros(0)
+    XN = torch.zeros(0,43)
 
+    score = torch.zeros(n)
+    NP    = torch.zeros(n, dtype=torch.long)
+    cnt = 0
+    for j in range(n):
+        i = IND[j]
+        score[j] = torch.tensor([float(P['scores'][i])])
 
+        X = P['coords'][i]
+        D = utils.distanceMap(X)
+        D = D / D.std()
+        D = torch.exp(-2 * D)
 
+        # Choose k=6 neiboughrs
+        nsparse = 6
+        vals, indices = torch.topk(D, k=min(nsparse, D.shape[0]), dim=1)
+        nd = D.shape[0]
+        I = torch.ger(torch.arange(nd), torch.ones(nsparse, dtype=torch.long))
+        I = I.view(-1)
+        J = indices.view(-1).type(torch.LongTensor)
+
+        II = torch.cat((II,I+cnt))
+        JJ = torch.cat((JJ,J+cnt))
+
+        xn = P['atom_types'][i]
+        XN = torch.cat((XN,xn),dim=0)
+        xe = D[I, J]
+        XE = torch.cat((XE,xe))
+
+        NP[j] = xn.shape[0]
+        cnt = cnt + xn.shape[0]
+
+    XN = XN.t()
+
+    return II, JJ, XN.unsqueeze(0), XE.unsqueeze(0).unsqueeze(0), NP, score
+
+def computeScore(XNOutP, XNOutL, NP, NL):
+
+    cnt = 0
+    n = len(NL)
+    compScore = torch.zeros(n)
+    for i in range(n):
+        xnOutP = XNOutP[:,:,cnt:cnt+NP[i]]
+        xnOutL = XNOutL[:,:,cnt:cnt+NL[i]]
+        bindingScore = torch.dot(torch.mean(xnOutP, dim=2).squeeze(), torch.mean(xnOutL, dim=2).squeeze())
+        compScore[i] = bindingScore
+
+    return compScore
 
 # Setup the network for ligand and its parameters
 nNin = 55
@@ -69,11 +124,10 @@ modelL.to(device)
 total_params = sum(p.numel() for p in modelL.parameters())
 print('Number of parameters  for ligand', total_params)
 
-IL, JL, xnL, xeL = getLigData(lig,5)
-nNodesL = xnL.shape[2]
-GL = GO.graph(IL, JL, nNodesL)
-
-xnOutL, xeOutL = modelL(xnL, xeL, GL)
+#IL, JL, xnL, xeL = getLigData(lig,5)
+#nNodesL = xnL.shape[2]
+#GL = GO.graph(IL, JL, nNodesL)
+#xnOutL, xeOutL = modelL(xnL, xeL, GL)
 
 
 # network for the protein
@@ -87,20 +141,17 @@ nNclose = 16
 nEclose = 1
 nlayer = 6
 
-
 modelP = GN.graphNetwork(nNin, nEin, nNopen, nEhid, nNclose, nlayer, h=.1)
 modelP.to(device)
 
 total_params = sum(p.numel() for p in modelP.parameters())
 print('Number of parameters  for pocket', total_params)
 
-IP, JP, xnP, xeP, score = getPocketData(pro,5)
-nNodesP = xnP.shape[2]
-GP = GO.graph(IP, JP, nNodesP)
-
-xnOutP, xeOutP = modelP(xnP, xeP, GP)
-
-bindingScore = torch.dot(torch.mean(xnOutP,dim=2).squeeze(),torch.mean(xnOutL,dim=2).squeeze())
+#IP, JP, xnP, xeP, score = getPocketData(pro,5)
+#nNodesP = xnP.shape[2]
+#GP = GO.graph(IP, JP, nNodesP)
+#xnOutP, xeOutP = modelP(xnP, xeP, GP)
+#bindingScore = torch.dot(torch.mean(xnOutP,dim=2).squeeze(),torch.mean(xnOutL,dim=2).squeeze())
 
 
 #### Start Training ####
@@ -132,20 +183,22 @@ optimizer = optim.Adam([{'params': modelP.K1Nopen, 'lr': lrO},
 
 epochs = 5
 
-ndata = 4
+ndata = 256
 hist = torch.zeros(epochs)
 
+batchSize = 64
 for j in range(epochs):
     # Prepare the data
     aloss = 0.0
-    for i in range(ndata):
+    for i in range(ndata//batchSize):
 
+        IND = torch.arange(i*batchSize,(i+1)*batchSize)
         # Get the lig data
-        IL, JL, xnL, xeL = getLigData(lig, i)
+        IL, JL, xnL, xeL, NL = getLigData(lig, IND)
         nNodesL = xnL.shape[2]
         GL = GO.graph(IL, JL, nNodesL)
         # Get the pro data
-        IP, JP, xnP, xeP, trueScore = getPocketData(pro, i)
+        IP, JP, xnP, xeP, NP, trueScore = getPocketData(pro, IND)
         nNodesP = xnP.shape[2]
         GP = GO.graph(IP, JP, nNodesP)
 
@@ -153,9 +206,9 @@ for j in range(epochs):
         xnOutL, xeOutL = modelL(xnL, xeL, GL)
         xnOutP, xeOutP = modelP(xnP, xeP, GP)
 
-        predScore = torch.dot(torch.mean(xnOutP, dim=2).squeeze(), torch.mean(xnOutL, dim=2).squeeze())
-
-        loss = F.mse_loss(predScore.unsqueeze(0), trueScore)
+        #predScore = torch.dot(torch.mean(xnOutP, dim=2).squeeze(), torch.mean(xnOutL, dim=2).squeeze())
+        predScore = computeScore(xnOutP, xnOutL, NP, NL)
+        loss = F.mse_loss(predScore, trueScore)
 
         optimizer.zero_grad()
         loss.backward()
