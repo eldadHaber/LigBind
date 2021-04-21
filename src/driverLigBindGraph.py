@@ -111,47 +111,47 @@ def computeScore(XNOutP, XNOutL, NP, NL):
 # Setup the network for ligand and its parameters
 nNin = 55
 nEin = 8
-nNopen = 16
-nEopen = 16
-nEhid = 16
+nopen = 16
+nhid  = 16
 nNclose = 16
 nEclose = 1
-nlayer = 18
+nlayer = 12
 
-modelL = GN.graphNetwork(nNin, nEin, nNopen, nEhid, nNclose, nlayer, h=.1)
+modelL = GN.graphNetwork(nNin, nEin, nopen, nhid, nNclose, nlayer, h=.01)
 modelL.to(device)
+
 
 total_params = sum(p.numel() for p in modelL.parameters())
 print('Number of parameters  for ligand', total_params)
 
-#IL, JL, xnL, xeL = getLigData(lig,5)
-#nNodesL = xnL.shape[2]
-#GL = GO.graph(IL, JL, nNodesL)
-#xnOutL, xeOutL = modelL(xnL, xeL, GL)
+IL, JL, xnL, xeL, NL = getLigData(lig,[5,10])
+nNodesL = xnL.shape[2]
+GL = GO.graph(IL, JL, nNodesL)
+xnOutL, xeOutL = modelL(xnL, xeL, GL)
 
 
 # network for the protein
 # Setup the network for ligand and its parameters
 nNin = 43
 nEin = 1
-nNopen = 16
-nEopen = 16
-nEhid = 16
-nNclose = 16
-nEclose = 1
-nlayer = 6
 
-modelP = GN.graphNetwork(nNin, nEin, nNopen, nEhid, nNclose, nlayer, h=.1)
+nopen = 16
+nhid  = 16
+nNclose = 16
+nlayer = 12
+
+modelP = GN.graphNetwork(nNin, nEin, nopen, nhid, nNclose, nlayer, h=.01)
 modelP.to(device)
+
 
 total_params = sum(p.numel() for p in modelP.parameters())
 print('Number of parameters  for pocket', total_params)
 
-#IP, JP, xnP, xeP, score = getPocketData(pro,5)
-#nNodesP = xnP.shape[2]
-#GP = GO.graph(IP, JP, nNodesP)
-#xnOutP, xeOutP = modelP(xnP, xeP, GP)
-#bindingScore = torch.dot(torch.mean(xnOutP,dim=2).squeeze(),torch.mean(xnOutL,dim=2).squeeze())
+IP, JP, xnP, xeP, score, NP = getPocketData(pro,[5,10])
+nNodesP = xnP.shape[2]
+GP = GO.graph(IP, JP, nNodesP)
+xnOutP, xeOutP = modelP(xnP, xeP, GP)
+bindingScore = torch.dot(torch.mean(xnOutP,dim=2).squeeze(),torch.mean(xnOutL,dim=2).squeeze())
 
 
 #### Start Training ####
@@ -167,8 +167,6 @@ optimizer = optim.Adam([{'params': modelP.K1Nopen, 'lr': lrO},
                         {'params': modelP.K2Eopen, 'lr': lrC},
                         {'params': modelP.KE1, 'lr': lrE1},
                         {'params': modelP.KE2, 'lr': lrE2},
-                        {'params': modelP.KN1, 'lr': lrE1},
-                        {'params': modelP.KN2, 'lr': lrE2},
                         {'params': modelP.KNclose, 'lr': lrE2},
                         {'params': modelL.K1Nopen, 'lr': lrO},
                         {'params': modelL.K2Nopen, 'lr': lrC},
@@ -176,12 +174,10 @@ optimizer = optim.Adam([{'params': modelP.K1Nopen, 'lr': lrO},
                         {'params': modelL.K2Eopen, 'lr': lrC},
                         {'params': modelL.KE1, 'lr': lrE1},
                         {'params': modelL.KE2, 'lr': lrE2},
-                        {'params': modelL.KN1, 'lr': lrE1},
-                        {'params': modelL.KN2, 'lr': lrE2},
                         {'params': modelL.KNclose, 'lr': lrE2}])
 
 
-epochs = 5
+epochs = 50
 
 ndata = 256
 hist = torch.zeros(epochs)
@@ -208,7 +204,7 @@ for j in range(epochs):
 
         #predScore = torch.dot(torch.mean(xnOutP, dim=2).squeeze(), torch.mean(xnOutL, dim=2).squeeze())
         predScore = computeScore(xnOutP, xnOutL, NP, NL)
-        loss = F.mse_loss(predScore, trueScore)
+        loss = F.mse_loss(predScore, trueScore)/F.mse_loss(trueScore*0, trueScore)
 
         optimizer.zero_grad()
         loss.backward()

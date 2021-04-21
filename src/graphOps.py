@@ -57,10 +57,11 @@ class graph(nn.Module):
 
     def __init__(self, iInd, jInd, nnodes, W=torch.tensor([1.0])):
         super(graph, self).__init__()
+        device = iInd.device
         self.iInd = iInd.long()
         self.jInd = jInd.long()
         self.nnodes = nnodes
-        self.W = W
+        self.W = W.to(device)
 
     def nodeGrad(self, x, W=[]):
         if len(W)==0:
