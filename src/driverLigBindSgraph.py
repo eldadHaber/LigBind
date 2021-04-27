@@ -42,10 +42,13 @@ def getLigData(lig,IND):
 
         I = (lig['atom_connect'][i][:,0]-1).long()
         J = (lig['atom_connect'][i][:,1]-1).long()
-        #temp = torch.arange(len(lig['coords'][0]))
+        #I = torch.cat((I,J))
+        #J = torch.cat((J,I))
+        #N = len(lig['coords'][i])
+        #temp = torch.arange(N)
         #I = torch.cat((I, temp))
         #J = torch.cat((J, temp))
-        kk = J.max()+1
+        kk = torch.tensor([J.max(),I.max()]).max()+1
         S  = torch.eye(kk,kk)
         S[I,J] = 1
         S = S+S.t()
@@ -55,7 +58,12 @@ def getLigData(lig,IND):
         JJ = torch.cat((JJ,J+cnt))
 
         #xe = torch.tensor(lig['bonds'][i][:,2], dtype=torch.long)
-        xe = lig['bond_type'][i].long()
+        #xe = lig['bond_type'][i].long()
+        #oo = torch.zeros(N,6)
+        #xe = torch.cat((xe,xe,oo),dim=0)
+        n  = I.shape[0]
+        xe = torch.zeros(n,6)
+
         XE = torch.cat((XE,xe),dim=0)
 
         xn = lig['atom_types'][i]
@@ -83,7 +91,7 @@ def getPocketData(P,IND):
     II = torch.zeros(0)
     JJ = torch.zeros(0)
     XE = torch.zeros(0)
-    XN = torch.zeros(0,43)
+    XN = torch.zeros(0,18)
 
     score = torch.zeros(n)
     NP    = torch.zeros(n, dtype=torch.long)
@@ -125,10 +133,10 @@ def getPocketData(P,IND):
 
     XN = XN.t()
 
-    return II, JJ, XN.unsqueeze(0), XE.unsqueeze(0).unsqueeze(0), NP, score
+    return II, JJ, XN.unsqueeze(0), XE.unsqueeze(0).unsqueeze(0), NP
 
 
-error
+
 
 def computeScore(XNOutP, XNOutL, NP, NL):
 
@@ -144,10 +152,10 @@ def computeScore(XNOutP, XNOutL, NP, NL):
     return compScore
 
 # Setup the network for ligand and its parameters
-nNin = 55
-nEin = 8
-nopen = 16
-nhid  = 16
+nNin = 19
+nEin = 6
+nopen = 16  #64
+nhid  = 16  #64
 nNclose = 16
 nEclose = 1
 nlayer = 12
@@ -159,7 +167,7 @@ modelL.to(device)
 total_params = sum(p.numel() for p in modelL.parameters())
 print('Number of parameters  for ligand', total_params)
 
-IL, JL, xnL, xeL, NL = getLigData(lig,[5,10])
+IL, JL, xnL, xeL, score, NL = getLigData(lig,[0,1])
 nNodesL = xnL.shape[2]
 GL = GO.graph(IL, JL, nNodesL)
 xnOutL, xeOutL = modelL(xnL, xeL, GL)
@@ -167,7 +175,7 @@ xnOutL, xeOutL = modelL(xnL, xeL, GL)
 
 # network for the protein
 # Setup the network for ligand and its parameters
-nNin = 43
+nNin = 18
 nEin = 1
 
 nopen = 16
@@ -178,15 +186,15 @@ nlayer = 12
 modelP = GN.graphNetwork(nNin, nEin, nopen, nhid, nNclose, nlayer, h=.01)
 modelP.to(device)
 
-
 total_params = sum(p.numel() for p in modelP.parameters())
 print('Number of parameters  for pocket', total_params)
 
-IP, JP, xnP, xeP, score, NP = getPocketData(pro,[5,10])
+IP, JP, xnP, xeP, NP = getPocketData(pro,[0,1])
 nNodesP = xnP.shape[2]
 GP = GO.graph(IP, JP, nNodesP)
 xnOutP, xeOutP = modelP(xnP, xeP, GP)
 bindingScore = torch.dot(torch.mean(xnOutP,dim=2).squeeze(),torch.mean(xnOutL,dim=2).squeeze())
+
 
 
 #### Start Training ####

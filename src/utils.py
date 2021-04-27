@@ -94,3 +94,13 @@ class resNet(nn.Module):
         return x
 
 
+def getICP(XL,XP, thresh=8):
+    # Compute a distance matrix
+    dL = torch.sum(XL**2, dim=0, keepdim=True)
+    dP = torch.sum(XP**2, dim=0, keepdim=True)
+
+    D = torch.sqrt(torch.relu(dL + dP.t() - 2*XP.t()@XL))
+    I, J = torch.nonzero(D<thresh, as_tuple=True)
+    Iu = I.unique()
+
+    return Iu
