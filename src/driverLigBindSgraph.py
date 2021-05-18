@@ -8,14 +8,18 @@ import matplotlib.pyplot as plt
 import math
 import torch.autograd.profiler as profiler
 
-from src import graphOps as GO
-from src import utils
-from src import graphNet as GN
+import graphOps as GO
+import utils
+import graphNet as GN
+#from src import graphOps as GO
+#from src import utils
+#from src import graphNet as GN
 
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
-lig = torch.load('../sampleData/docking_raw_data_lig.pt')
-pro = torch.load('../sampleData/docking_raw_data_rec.pt')
+lig = torch.load('../../../data/mpro_docking_data/mpro_lig_select.pt')
+pro = torch.load('../../../data/mpro_docking_data/mpro_rec_select.pt')
+
 
 def getLigData(lig,IND):
 
@@ -24,7 +28,7 @@ def getLigData(lig,IND):
     #charge = lig['charge']
     #score  = lig['score']
     #dof    = lig['torsdof']
-    ##atomc  = lig['atom_connect']
+    #atomc  = lig['atom_connect']
     #btype  = lig['bond_type']
 
     n = len(IND)
@@ -38,7 +42,7 @@ def getLigData(lig,IND):
     for j in range(n):
 
         i = IND[j]
-        score[j] = torch.tensor([float(lig['score'][i])])
+        score[j] = torch.tensor([float(lig['scores'][i])])
 
         I = (lig['atom_connect'][i][:,0]-1).long()
         J = (lig['atom_connect'][i][:,1]-1).long()
@@ -67,7 +71,7 @@ def getLigData(lig,IND):
         XE = torch.cat((XE,xe),dim=0)
 
         xn = lig['atom_types'][i]
-        cn = lig['charge'][i].unsqueeze(1)
+        cn = lig['charges'][i].unsqueeze(1)
 
         xn = torch.cat((xn,5*cn),dim=1)
         XN = torch.cat((XN, xn), dim=0)
@@ -78,6 +82,9 @@ def getLigData(lig,IND):
     XN = XN.t().unsqueeze(0)
 
     return II, JJ, XN, XE.float(), score, NL
+
+#II, JJ, XN, XE, score, NL = getLigData(lig,[1])
+
 
 def getPocketData(P,IND):
 
@@ -110,7 +117,7 @@ def getPocketData(P,IND):
         D = torch.exp(-2 * D)
 
         # Choose k=11 neiboughrs
-        nsparse = 111
+        nsparse = 32
         vals, indices = torch.topk(D, k=min(nsparse, D.shape[0]), dim=1)
         nd = D.shape[0]
         I = torch.ger(torch.arange(nd), torch.ones(nsparse, dtype=torch.long))
@@ -125,7 +132,7 @@ def getPocketData(P,IND):
         xe = D[I, J]
         XE = torch.cat((XE,xe))
 
-        cn = P['charge'][i].unsqueeze(1)
+        cn = P['charges'][i].unsqueeze(1)
         xn = torch.cat((xn, 5*cn), dim=1)
 
         NP[j] = xn.shape[0]
@@ -133,9 +140,15 @@ def getPocketData(P,IND):
 
     XN = XN.t()
 
-    return II, JJ, XN.unsqueeze(0), XE.unsqueeze(0).unsqueeze(0), NP
+    IJ1 = torch.cat((II, JJ)).unsqueeze(1)
+    IJ2 = torch.cat((JJ, II)).unsqueeze(1)
+    IJ = torch.cat((IJ1, IJ2), dim=1)
+    IJ = IJ.unique(dim=0)
+    II = IJ[:,0]
+    JJ = IJ[:,1]
+    return II.long(), JJ.long(), XN.unsqueeze(0), XE.unsqueeze(0).unsqueeze(0), NP
 
-
+#II, JJ, XN, XE, NP = getPocketData(pro,[1])
 
 
 def computeScore(XNOutP, XNOutL, NP, NL):
@@ -152,38 +165,36 @@ def computeScore(XNOutP, XNOutL, NP, NL):
     return compScore
 
 # Setup the network for ligand and its parameters
-nNin = 19
-nEin = 6
-nopen = 16  #64
-nhid  = 16  #64
-nNclose = 16
-nEclose = 1
-nlayer = 12
 
-modelL = GN.graphNetwork(nNin, nEin, nopen, nhid, nNclose, nlayer, h=.01)
+nNin    = 19
+nopen   = 32
+nhid    = 32
+nNclose = 32
+nlayer  = 12
+
+modelL = GN.graphNetwork(nNin, nopen, nNclose, nlayer)
 modelL.to(device)
 
 
 total_params = sum(p.numel() for p in modelL.parameters())
 print('Number of parameters  for ligand', total_params)
 
-IL, JL, xnL, xeL, score, NL = getLigData(lig,[0,1])
+
+IL, JL, xnL, xeL, score, NL = getLigData(lig,[1,2])
 nNodesL = xnL.shape[2]
 GL = GO.graph(IL, JL, nNodesL)
-xnOutL, xeOutL = modelL(xnL, xeL, GL)
+xnOutL = modelL(xnL, xeL, GL)
 
 
 # network for the protein
 # Setup the network for ligand and its parameters
 nNin = 18
-nEin = 1
+nopen = 32
+nhid  = 32
+nNclose = 32
+nlayer = 6
 
-nopen = 16
-nhid  = 16
-nNclose = 16
-nlayer = 12
-
-modelP = GN.graphNetwork(nNin, nEin, nopen, nhid, nNclose, nlayer, h=.01)
+modelP = GN.graphNetwork(nNin, nopen, nNclose, nlayer)
 modelP.to(device)
 
 total_params = sum(p.numel() for p in modelP.parameters())
@@ -192,10 +203,9 @@ print('Number of parameters  for pocket', total_params)
 IP, JP, xnP, xeP, NP = getPocketData(pro,[0,1])
 nNodesP = xnP.shape[2]
 GP = GO.graph(IP, JP, nNodesP)
-xnOutP, xeOutP = modelP(xnP, xeP, GP)
-bindingScore = torch.dot(torch.mean(xnOutP,dim=2).squeeze(),torch.mean(xnOutL,dim=2).squeeze())
+xnOutP = modelP(xnP, xeP, GP)
 
-
+s = computeScore(xnOutP, xnOutL, NP, NL)
 
 #### Start Training ####
 lrO = 1e-3
@@ -206,26 +216,24 @@ lrE2 = 1e-3
 
 optimizer = optim.Adam([{'params': modelP.K1Nopen, 'lr': lrO},
                         {'params': modelP.K2Nopen, 'lr': lrC},
-                        {'params': modelP.K1Eopen, 'lr': lrO},
-                        {'params': modelP.K2Eopen, 'lr': lrC},
                         {'params': modelP.KE1, 'lr': lrE1},
                         {'params': modelP.KE2, 'lr': lrE2},
                         {'params': modelP.KNclose, 'lr': lrE2},
+                        {'params': modelP.Kw, 'lr': lrE2},
                         {'params': modelL.K1Nopen, 'lr': lrO},
                         {'params': modelL.K2Nopen, 'lr': lrC},
-                        {'params': modelL.K1Eopen, 'lr': lrO},
-                        {'params': modelL.K2Eopen, 'lr': lrC},
                         {'params': modelL.KE1, 'lr': lrE1},
                         {'params': modelL.KE2, 'lr': lrE2},
-                        {'params': modelL.KNclose, 'lr': lrE2}])
+                        {'params': modelL.KNclose, 'lr': lrE2},
+                        {'params': modelL.Kw, 'lr': lrE2}])
 
 
 epochs = 50
 
-ndata = 256
+ndata = 20
 hist = torch.zeros(epochs)
 
-batchSize = 64
+batchSize = 4
 for j in range(epochs):
     # Prepare the data
     aloss = 0.0
@@ -233,21 +241,21 @@ for j in range(epochs):
 
         IND = torch.arange(i*batchSize,(i+1)*batchSize)
         # Get the lig data
-        IL, JL, xnL, xeL, NL = getLigData(lig, IND)
+        IL, JL, xnL, xeL, truescore,  NL = getLigData(lig, IND)
         nNodesL = xnL.shape[2]
         GL = GO.graph(IL, JL, nNodesL)
         # Get the pro data
-        IP, JP, xnP, xeP, NP, trueScore = getPocketData(pro, IND)
+        IP, JP, xnP, xeP, NP = getPocketData(pro, IND)
         nNodesP = xnP.shape[2]
         GP = GO.graph(IP, JP, nNodesP)
 
         optimizer.zero_grad()
-        xnOutL, xeOutL = modelL(xnL, xeL, GL)
-        xnOutP, xeOutP = modelP(xnP, xeP, GP)
+        xnOutL = modelL(xnL, xeL, GL)
+        xnOutP = modelP(xnP, xeP, GP)
 
         #predScore = torch.dot(torch.mean(xnOutP, dim=2).squeeze(), torch.mean(xnOutL, dim=2).squeeze())
         predScore = computeScore(xnOutP, xnOutL, NP, NL)
-        loss = F.mse_loss(predScore, trueScore)/F.mse_loss(trueScore*0, trueScore)
+        loss = F.mse_loss(predScore, truescore)/F.mse_loss(truescore*0, truescore)
 
         optimizer.zero_grad()
         loss.backward()

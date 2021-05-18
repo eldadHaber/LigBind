@@ -57,11 +57,10 @@ class graph(nn.Module):
 
     def __init__(self, iInd, jInd, nnodes, W=torch.tensor([1.0])):
         super(graph, self).__init__()
-        device = iInd.device
         self.iInd = iInd.long()
         self.jInd = jInd.long()
         self.nnodes = nnodes
-        self.W = W.to(device)
+        self.W = W
 
     def nodeGrad(self, x, W=[]):
         if len(W)==0:
@@ -91,7 +90,7 @@ class graph(nn.Module):
 
         return x
 
-    def edgeAve(self, g, W=[], method='max' ):
+    def edgeAve(self, g,  W=[], method='max'):
         if len(W)==0:
             W = self.W
         x1 = torch.zeros(g.shape[0], g.shape[1], self.nnodes, device=g.device)
@@ -112,45 +111,8 @@ class graph(nn.Module):
 
     def edgeLength(self, x):
         g = self.nodeGrad(x)
-        L = torch.sqrt(torch.pow(g, 2).sum(dim=1))
+        #L = torch.sqrt(torch.pow(g, 2).sum(dim=1))
+        L = torch.pow(g, 2).sum(dim=1)
+
         return L
 
-
-
-### Try to work in parallel
-
-###### Testing stuff
-# tests = 1
-# if tests:
-#    nnodes = 512
-#     II = torch.torch.zeros(nnodes*(nnodes-1)//2)
-#     JJ = torch.torch.zeros(nnodes*(nnodes-1)//2)
-#
-#     k = 0
-#     for i in range(nnodes):
-#         for j in range(i+1,nnodes):
-#             II[k] = i
-#             JJ[k] = j
-#             k+=1
-#
-#     G = graph(II,JJ,nnodes)
-#     x  = torch.randn(1,128,nnodes)
-#
-#     test_adjoint = 0
-#     if test_adjoint:
-#         # Adjoint test
-#         w = torch.rand(G.iInd.shape[0])
-#         y = G.nodeGrad(x,w)
-#         ne = G.iInd.numel()
-#         z = torch.randn(1,128,ne)
-#         a1 = torch.sum(z*y)
-#         v = G.edgeDiv(z,w)
-#         a2 = torch.sum(v*x)
-#         print(a1,a2)
-#
-#
-#
-#     nhid = 8
-#     L = graphDiffusionLayer(G,x.shape[1],nhid)
-#
-#     y = L(x)
