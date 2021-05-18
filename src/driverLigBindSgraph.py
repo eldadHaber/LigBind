@@ -260,11 +260,20 @@ for j in range(epochs):
         optimizer.zero_grad()
         loss.backward()
 
+        gC  = modelP.KNclose.grad.norm().item()
+        gE1 = modelP.KE1.grad.norm().item()
+        gE2 = modelP.KE2.grad.norm().item()
+        gO1 = modelP.K1Nopen.grad.norm().item()
+        gO2 = modelP.K2Nopen.grad.norm().item()
+        gw  = modelP.Kw.grad.norm().item()
+
+
         aloss += loss.detach()
         optimizer.step()
         # scheduler.step()
         nprnt = 1
         if (i + 1) % nprnt == 0:
             aloss = aloss / nprnt
-            print("%2d.%1d   %10.3E" % (j, i, aloss), flush=True)
+            print("%2d.%1d   %10.3E   %10.3E   %10.3E   %10.3E   %10.3E   %10.3E   %10.3E"
+                  % (j, i, aloss, gC, gE1, gE2, gO1, gO2, gw), flush=True)
             aloss = 0.0
