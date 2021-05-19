@@ -151,25 +151,28 @@ def getPocketData(P,IND):
 #II, JJ, XN, XE, NP = getPocketData(pro,[1])
 
 
-def computeScore(XNOutP, XNOutL, NP, NL):
+def computeScore(XNOutP, XNOutL, NP, NL, H=0):
 
+    #if len(H) == 0:
+    #    H = torch.eye(XNOutL.shape[1],XNOutL.shape[1], device=XNOutL.device)
     cnt = 0
     n = len(NL)
     compScore = torch.zeros(n)
     for i in range(n):
         xnOutP = XNOutP[:,:,cnt:cnt+NP[i]]
         xnOutL = XNOutL[:,:,cnt:cnt+NL[i]]
-        bindingScore = torch.dot(torch.mean(xnOutP, dim=2).squeeze(), torch.mean(xnOutL, dim=2).squeeze())
+        bindingScore = H+torch.dot(torch.mean(xnOutP, dim=2).squeeze(), torch.mean(xnOutL, dim=2).squeeze())
         compScore[i] = bindingScore
+        cnt = cnt + NP[i]
 
     return compScore
 
 # Setup the network for ligand and its parameters
 
 nNin    = 19
-nopen   = 32
-nhid    = 32
-nNclose = 32
+nopen   = 8
+nhid    = 8
+nNclose = 8
 nlayer  = 12
 
 modelL = GN.graphNetwork(nNin, nopen, nNclose, nlayer)
@@ -189,10 +192,10 @@ xnOutL = modelL(xnL, xeL, GL)
 # network for the protein
 # Setup the network for ligand and its parameters
 nNin = 18
-nopen = 32
-nhid  = 32
-nNclose = 32
-nlayer = 6
+nopen = 8
+nhid  = 8
+nNclose = 8
+nlayer = 64
 
 modelP = GN.graphNetwork(nNin, nopen, nNclose, nlayer)
 modelP.to(device)
@@ -208,32 +211,49 @@ xnOutP = modelP(xnP, xeP, GP)
 s = computeScore(xnOutP, xnOutL, NP, NL)
 
 #### Start Training ####
-lrO = 1e-3
-lrC = 1e-3
-lrN = 1e-3
-lrE1 = 1e-3
-lrE2 = 1e-3
+lrO = 1e-2
+lrC = 1e-2
+lrW = 1e-2
+lrE1 = 1e-2
+lrE2 = 1e-2
+lrH  = 1e-1
 
-optimizer = optim.Adam([{'params': modelP.K1Nopen, 'lr': lrO},
-                        {'params': modelP.K2Nopen, 'lr': lrC},
-                        {'params': modelP.KE1, 'lr': lrE1},
-                        {'params': modelP.KE2, 'lr': lrE2},
-                        {'params': modelP.KNclose, 'lr': lrE2},
-                        {'params': modelP.Kw, 'lr': lrE2},
-                        {'params': modelL.K1Nopen, 'lr': lrO},
-                        {'params': modelL.K2Nopen, 'lr': lrC},
+H = nn.Parameter(torch.zeros(1))
+
+#optimizer = optim.Adam([{'params': modelP.K1Nopen, 'lr': lrO},
+#                        {'params': modelP.K2Nopen, 'lr': lrO},
+#                        {'params': modelP.KE1, 'lr': lrE1},
+#                        {'params': modelP.KE2, 'lr': lrE2},
+#                        {'params': modelP.KNclose, 'lr': lrC},
+#                        {'params': modelP.Kw, 'lr': lrW},
+#                        {'params': modelL.K1Nopen, 'lr': lrO},
+#                        {'params': modelL.K2Nopen, 'lr': lrO},
+#                        {'params': modelL.KE1, 'lr': lrE1},
+#                        {'params': modelL.KE2, 'lr': lrE2},
+#                        {'params': modelL.KNclose, 'lr': lrC},
+#                        {'params': modelL.Kw, 'lr': lrW}])
+
+optimizer = optim.Adam([{'params': modelL.K1Nopen, 'lr': lrO},
+                        {'params': modelL.K2Nopen, 'lr': lrO},
                         {'params': modelL.KE1, 'lr': lrE1},
                         {'params': modelL.KE2, 'lr': lrE2},
-                        {'params': modelL.KNclose, 'lr': lrE2},
-                        {'params': modelL.Kw, 'lr': lrE2}])
+                        {'params': modelL.KNclose, 'lr': lrC},
+                        {'params': modelL.Kw, 'lr': lrW},
+                        {'params': H, 'lr': lrH}])
 
 
-epochs = 50
 
-ndata = 20
+epochs = 500
+
+ndata = 64
 hist = torch.zeros(epochs)
 
-batchSize = 4
+bestLoss = 1e11
+bestModelP = modelP
+bestModelL = modelL
+
+
+batchSize = 64
 for j in range(epochs):
     # Prepare the data
     aloss = 0.0
@@ -245,27 +265,30 @@ for j in range(epochs):
         nNodesL = xnL.shape[2]
         GL = GO.graph(IL, JL, nNodesL)
         # Get the pro data
-        IP, JP, xnP, xeP, NP = getPocketData(pro, IND)
-        nNodesP = xnP.shape[2]
-        GP = GO.graph(IP, JP, nNodesP)
+        #IP, JP, xnP, xeP, NP = getPocketData(pro, IND)
+        #nNodesP = xnP.shape[2]
+        #GP = GO.graph(IP, JP, nNodesP)
 
         optimizer.zero_grad()
         xnOutL = modelL(xnL, xeL, GL)
-        xnOutP = modelP(xnP, xeP, GP)
+        #xnOutP = modelP(xnP, xeP, GP)
 
         #predScore = torch.dot(torch.mean(xnOutP, dim=2).squeeze(), torch.mean(xnOutL, dim=2).squeeze())
-        predScore = computeScore(xnOutP, xnOutL, NP, NL)
+        xnOutP    = torch.ones(xnOutL.shape)
+        #predScore = computeScore(xnOutP, xnOutL, NP, NL)
+        predScore = computeScore(xnOutP, xnOutL, NL, NL, H)
+
         loss = F.mse_loss(predScore, truescore)/F.mse_loss(truescore*0, truescore)
 
         optimizer.zero_grad()
         loss.backward()
 
-        gC  = modelP.KNclose.grad.norm().item()
-        gE1 = modelP.KE1.grad.norm().item()
-        gE2 = modelP.KE2.grad.norm().item()
-        gO1 = modelP.K1Nopen.grad.norm().item()
-        gO2 = modelP.K2Nopen.grad.norm().item()
-        gw  = modelP.Kw.grad.norm().item()
+        gC  = modelL.KNclose.grad.norm().item()
+        gE1 = modelL.KE1.grad.norm().item()
+        gE2 = modelL.KE2.grad.norm().item()
+        gO1 = modelL.K1Nopen.grad.norm().item()
+        gO2 = modelL.K2Nopen.grad.norm().item()
+        gw  = modelL.Kw.grad.norm().item()
 
 
         aloss += loss.detach()
@@ -273,7 +296,15 @@ for j in range(epochs):
         # scheduler.step()
         nprnt = 1
         if (i + 1) % nprnt == 0:
-            aloss = aloss / nprnt
+            aloss = torch.sqrt(aloss / nprnt)
             print("%2d.%1d   %10.3E   %10.3E   %10.3E   %10.3E   %10.3E   %10.3E   %10.3E"
                   % (j, i, aloss, gC, gE1, gE2, gO1, gO2, gw), flush=True)
             aloss = 0.0
+
+            if aloss < bestLoss:
+                bestModelP = modelP
+                bestModelL = modelL
+                bestLoss   = aloss
+
+plt.plot(predScore.detach())
+plt.plot(truescore.detach())

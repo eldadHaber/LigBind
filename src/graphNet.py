@@ -60,7 +60,7 @@ class graphNetwork(nn.Module):
         self.KE1 = nn.Parameter(IdTensor * stdvp)
         self.KE2 = nn.Parameter(IdTensort * stdvp)
 
-        self.KNclose = nn.Parameter(torch.eye(nNclose, nopen))
+        self.KNclose = nn.Parameter(torch.randn(nNclose, nopen)*1e-2)
         self.Kw = nn.Parameter(torch.ones(nopen,1))
 
     def doubleLayer(self, x, K1, K2):
@@ -114,10 +114,12 @@ class graphNetwork(nn.Module):
 
             tmp  = xn.clone()
             xn   = 2*xn - xnold - self.h * (divE + aveE + aveB + aveI + aveS)
+            #xn = xn - self.h * (divE + aveE + aveB + aveI + aveS)
+
             xnold = tmp
 
         xn = F.conv1d(xn, self.KNclose.unsqueeze(-1))
-
+        xn = torch.cat((torch.relu(xn),torch.relu(-xn)),dim=1)
 
         return xn
 
