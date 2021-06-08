@@ -8,9 +8,9 @@ import matplotlib.pyplot as plt
 import math
 import torch.autograd.profiler as profiler
 
-import graphOps as GO
-import utils
-import graphNet as GN
+from src import graphOps as GO
+from src import utils
+from src import graphNet as GN
 #from src import graphOps as GO
 #from src import utils
 #from src import graphNet as GN
@@ -245,7 +245,7 @@ optimizer = optim.Adam([{'params': modelL.K1Nopen, 'lr': lrO},
 
 epochs = 500
 
-ndata = 64
+ndata = 900
 hist = torch.zeros(epochs)
 
 bestLoss = 1e11
@@ -253,7 +253,7 @@ bestModelP = modelP
 bestModelL = modelL
 
 
-batchSize = 64
+batchSize = 100
 for j in range(epochs):
     # Prepare the data
     aloss = 0.0
