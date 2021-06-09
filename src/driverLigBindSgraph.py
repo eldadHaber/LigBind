@@ -52,11 +52,11 @@ def getLigData(lig,IND):
         #temp = torch.arange(N)
         #I = torch.cat((I, temp))
         #J = torch.cat((J, temp))
-        kk = torch.tensor([J.max(),I.max()]).max()+1
-        S  = torch.eye(kk,kk)
-        S[I,J] = 1
-        S = S+S.t()
-        I,J = torch.nonzero(S,as_tuple=True)
+        #kk = torch.tensor([J.max(),I.max()]).max()+1
+        #S  = torch.eye(kk,kk)
+        #S[I,J] = 1
+        #S = S+S.t()
+        #I,J = torch.nonzero(S,as_tuple=True)
 
         II = torch.cat((II,I+cnt))
         JJ = torch.cat((JJ,J+cnt))
