@@ -119,6 +119,83 @@ class graphNetwork(nn.Module):
             xnold = tmp
 
         xn = F.conv1d(xn, self.KNclose.unsqueeze(-1))
-        xn = torch.cat((torch.relu(xn),torch.relu(-xn)),dim=1)
+        #xn = torch.cat((torch.relu(xn),torch.relu(-xn)),dim=1)
+
+        return xn
+
+
+class graphNetworkLin(nn.Module):
+
+    def __init__(self, nNin, nopen, nNclose, nlayer, h=0.1):
+        super(graphNetworkLin, self).__init__()
+
+        self.h = h
+        stdv = 1.0 #1e-2
+        stdvp = 1.0 # 1e-3
+        self.K1Nopen = nn.Parameter(torch.randn(nopen, nNin) * stdv)
+        self.K2Nopen = nn.Parameter(torch.randn(nopen, nopen) * stdv)
+
+        #nopen      = 3*nopen  # [xn; Av*xe; Div*xe]
+        self.nopen = nopen
+
+        nhid = 2*nopen
+        Id  = (torch.eye(nhid,2*nopen)).unsqueeze(0) #+ 1e-3*torch.randn(nhid,5*nopen)).unsqueeze(0)
+        Idt = (torch.eye(2*nopen, nhid)).unsqueeze(0) # + 1e-3*torch.randn(5*nopen,nhid)).unsqueeze(0)
+
+        IdTensor  = torch.repeat_interleave(Id, nlayer, dim=0)
+        IdTensort = torch.repeat_interleave(Idt, nlayer, dim=0)
+        self.KE1 = nn.Parameter(IdTensor * stdvp)
+        self.KE2 = nn.Parameter(IdTensort * stdvp)
+
+        self.KNclose = nn.Parameter(torch.randn(nNclose, nopen)*1e-2)
+        self.Kw = nn.Parameter(torch.ones(nopen,1))
+
+    def doubleLayer(self, x, K1, K2):
+
+        #x = torch.tanh(x)
+        x = F.conv1d(x, K1.unsqueeze(-1))  # self.edgeConv(x, K1)
+        #x = tv_norm(x)
+        x = torch.tanh(x)
+        x = F.conv1d(x, K2.unsqueeze(-1))
+        #x = torch.tanh(x)
+
+        return x
+
+    def forward(self, xn, xe, Graph):
+
+        # Opening layer
+        # xn = [B, C, N]
+        # xe =  [B, C, E]
+        # Opening layer
+        xn = self.doubleLayer(xn, self.K1Nopen, self.K2Nopen)
+        #xe = self.doubleLayer(xe, self.K1Eopen, self.K2Eopen)
+        #xn = torch.cat([xn,Graph.edgeDiv(xe), Graph.edgeAve(xe)], dim=1)
+
+        nlayers = self.KE1.shape[0]
+
+        xnold = xn
+        for i in range(nlayers):
+
+            # Compute the distance in real space
+            #x3    = F.conv1d(xn, self.KNclose.unsqueeze(-1))
+            w     = Graph.edgeLength(xn)
+            w     = self.Kw@w
+            w     = w/(torch.std(w)+1e-4)
+            w     = torch.exp(-(w**2))
+            #w     = torch.ones(xe.shape[2], device=xe.device)
+
+            gradX   = Graph.nodeGrad(xn,w)
+            intX    = Graph.nodeAve(xn,w)
+
+            dxe = torch.cat([gradX, intX], dim=1)
+
+            dxe  = self.doubleLayer(dxe, self.KE1[i], self.KE2[i])
+
+            divE = Graph.edgeDiv(dxe[:,:self.nopen,:],w)
+            aveE = Graph.edgeAve(dxe[:,self.nopen:2*self.nopen,:],w)
+
+            xn   = xn - self.h * (divE + aveE)
+
+        xn = F.conv1d(xn, self.KNclose.unsqueeze(-1))
 
         return xn
