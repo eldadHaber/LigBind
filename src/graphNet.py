@@ -119,6 +119,7 @@ class graphNetwork(nn.Module):
             xnold = tmp
 
         xn = F.conv1d(xn, self.KNclose.unsqueeze(-1))
+
         #xn = torch.cat((torch.relu(xn),torch.relu(-xn)),dim=1)
 
         return xn

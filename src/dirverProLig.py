@@ -20,7 +20,9 @@ device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 #lig = torch.load('../../../data/intmin_docking_data/1f02_subset_train.pt')
 #lig = torch.load('../../../data/mpro_docking_data/mpro_lig_select.pt')
 #pro = torch.load('../../../data/mpro_docking_data/mpro_rec_select.pt')
-lig = torch.load('../../../data/intmin_docking_data/1f02_train.pt')
+#lig = torch.load('../../../data/intmin_docking_data/1f02_train.pt')
+lig = torch.load('../../../data/intmin_docking_data/all_200.pt')
+pro = torch.load('../../../data/intmin_docking_data/all_rec_info.pt')
 
 
 def getLigData(lig,IND):
@@ -40,6 +42,7 @@ def getLigData(lig,IND):
     XN = torch.zeros(0,19)
     NL = torch.zeros(n, dtype=torch.long)
     score = torch.zeros(n)
+    receptor = ['0']*n
     cnt = 0
     for j in range(n):
 
@@ -48,17 +51,6 @@ def getLigData(lig,IND):
 
         I = (lig['atom_connect'][i][:,0]-1).long()
         J = (lig['atom_connect'][i][:,1]-1).long()
-        #I = torch.cat((I,J))
-        #J = torch.cat((J,I))
-        #N = len(lig['coords'][i])
-        #temp = torch.arange(N)
-        #I = torch.cat((I, temp))
-        #J = torch.cat((J, temp))
-        #kk = torch.tensor([J.max(),I.max()]).max()+1
-        #S  = torch.eye(kk,kk)
-        #S[I,J] = 1
-        #S = S+S.t()
-        #I,J = torch.nonzero(S,as_tuple=True)
 
         II = torch.cat((II,I+cnt))
         JJ = torch.cat((JJ,J+cnt))
@@ -80,92 +72,79 @@ def getLigData(lig,IND):
         NL[j] = xn.shape[0]
         cnt = cnt + xn.shape[0]
 
+        receptor[j] = lig['receptor'][i]
+
     XE = XE.t().unsqueeze(0)
     XN = XN.t().unsqueeze(0)
 
-    return II, JJ, XN, XE.float(), score, NL
-
-#II, JJ, XN, XE, score, NL = getLigData(lig,[1])
+    return II, JJ, XN, XE.float(), score, NL, receptor
 
 
-# def getPocketData(P,IND):
-#
-#     #X      = lig['coords']
-#     #atype  = lig['atom_types']
-#     #charge = lig['charge']
-#     #atomc  = lig['atom_connect']
-#     #btype  = lig['bond_type']
-#     #
-#     n = len(IND)
-#     II = torch.zeros(0)
-#     JJ = torch.zeros(0)
-#     XE = torch.zeros(0)
-#     XN = torch.zeros(0,18)
-#
-#     score = torch.zeros(n)
-#     NP    = torch.zeros(n, dtype=torch.long)
-#     cnt = 0
-#     for j in range(n):
-#         i = IND[j]
-#
-#         #I = (lig['atom_connect'][i][:,0]-1).long()
-#         #J = (lig['atom_connect'][i][:,1]-1).long()
-#         #II = torch.cat((II,I+cnt))
-#         #JJ = torch.cat((JJ,J+cnt))
-#
-#         X = P['coords'][i]
-#         D = utils.distanceMap(X)
-#         D = D / D.std()
-#         D = torch.exp(-2 * D)
-#
-#         # Choose k=11 neiboughrs
-#         nsparse = 32
-#         vals, indices = torch.topk(D, k=min(nsparse, D.shape[0]), dim=1)
-#         nd = D.shape[0]
-#         I = torch.ger(torch.arange(nd), torch.ones(nsparse, dtype=torch.long))
-#         I = I.view(-1)
-#         J = indices.view(-1).type(torch.LongTensor)
-#
-#         II = torch.cat((II,I+cnt))
-#         JJ = torch.cat((JJ,J+cnt))
-#
-#         xn = P['atom_types'][i]
-#         XN = torch.cat((XN,xn),dim=0)
-#         xe = D[I, J]
-#         XE = torch.cat((XE,xe))
-#
-#         cn = P['charges'][i].unsqueeze(1)
-#         xn = torch.cat((xn, 5*cn), dim=1)
-#
-#         NP[j] = xn.shape[0]
-#         cnt = cnt + xn.shape[0]
-#
-#     XN = XN.t()
-#
-#     IJ1 = torch.cat((II, JJ)).unsqueeze(1)
-#     IJ2 = torch.cat((JJ, II)).unsqueeze(1)
-#     IJ = torch.cat((IJ1, IJ2), dim=1)
-#     IJ = IJ.unique(dim=0)
-#     II = IJ[:,0]
-#     JJ = IJ[:,1]
-#     return II.long(), JJ.long(), XN.unsqueeze(0), XE.unsqueeze(0).unsqueeze(0), NP
+def getPocketData(P,IND, conf):
 
-#II, JJ, XN, XE, NP = getPocketData(pro,[1])
+    n = len(IND)
+    II = torch.zeros(0)
+    JJ = torch.zeros(0)
+    XE = torch.zeros(0)
+    XN = torch.zeros(0,18)
 
-
-def computeScore(XNOutP, XNOutL, NP, NL, H=0):
-
-    #if len(H) == 0:
-    #    H = torch.eye(XNOutL.shape[1],XNOutL.shape[1], device=XNOutL.device)
+    NP    = torch.zeros(n, dtype=torch.long)
     cnt = 0
+    for j in range(n):
+        i = IND[j]
+
+        X = P[conf]['coords'][i]
+        D = utils.distanceMap(X)
+        D = D / D.std()
+        D = torch.exp(-2 * D)
+        D = torch.triu(D,0)
+
+        # Choose nsparse neiboughrs
+        nsparse = 9
+        vals, indices = torch.topk(D, k=min(nsparse, D.shape[0]), dim=1)
+        nd = D.shape[0]
+        I = torch.ger(torch.arange(nd), torch.ones(nsparse, dtype=torch.long))
+        I = I.view(-1)
+        J = indices.view(-1).type(torch.LongTensor)
+
+        II = torch.cat((II,I+cnt))
+        JJ = torch.cat((JJ,J+cnt))
+
+        xn = P[conf]['atom_types'][i]
+        XN = torch.cat((XN,xn),dim=0)
+        xe = D[I, J]
+        XE = torch.cat((XE,xe))
+
+        cn = P[conf]['charges'][i].unsqueeze(1)
+        xn = torch.cat((xn, 5*cn), dim=1)
+
+        NP[j] = xn.shape[0]
+        cnt = cnt + xn.shape[0]
+
+    XN = XN.t()
+
+    IJ1 = torch.cat((II, JJ)).unsqueeze(1)
+    IJ2 = torch.cat((JJ, II)).unsqueeze(1)
+    IJ = torch.cat((IJ1, IJ2), dim=1)
+    IJ = IJ.unique(dim=0)
+    II = IJ[:,0]
+    JJ = IJ[:,1]
+    return II.long(), JJ.long(), XN.unsqueeze(0), XE.unsqueeze(0).unsqueeze(0), NP
+
+
+def computeScore(XNOutP, XNOutL, NP, NL, bias=0):
+
+    cntP = 0
+    cntL = 0
     n = len(NL)
     compScore = torch.zeros(n)
     for i in range(n):
-        xnOutP = XNOutP[:,:,cnt:cnt+NP[i]]
-        xnOutL = XNOutL[:,:,cnt:cnt+NL[i]]
-        bindingScore = H+torch.dot(torch.mean(xnOutP, dim=2).squeeze(), torch.mean(xnOutL, dim=2).squeeze())
+        xnOutP = XNOutP[:,:,cntP:cntP+NP[i]]
+        xnOutL = XNOutL[:,:,cntL:cntL+NL[i]]
+        bindingScore = bias+torch.dot(torch.mean(xnOutP, dim=2).squeeze(), torch.mean(xnOutL, dim=2).squeeze())
         compScore[i] = bindingScore
-        cnt = cnt + NP[i]
+        cntP = cntP + NP[i]
+        cntL = cntL + NL[i]
 
     return compScore
 
@@ -174,48 +153,50 @@ def computeScore(XNOutP, XNOutL, NP, NL, H=0):
 nNin    = 19
 nopen   = 32
 nNclose = 8
-nlayer  = 12
+nlayer  = 6
 
 modelL = GN.graphNetwork(nNin, nopen, nNclose, nlayer)
-#modelL = GN.graphNetworkLin(nNin, nopen, nNclose, nlayer)
-
 modelL.to(device)
 
 
 total_params = sum(p.numel() for p in modelL.parameters())
 print('Number of parameters  for ligand', total_params)
 
-
-IL, JL, xnL, xeL, score, NL = getLigData(lig,[1,2])
-nNodesL = xnL.shape[2]
-GL = GO.graph(IL, JL, nNodesL)
-xnOutL = modelL(xnL, xeL, GL)
-
-
 # network for the protein
-# Setup the network for ligand and its parameters
-#nNin = 18
-#nopen = 128
-#nhid  = 8
-#nNclose = 8
-#nlayer = 64
+# Setup the network for protein and its parameters
+nNin = 18
+nopen = 16
+nNclose = 8
+nlayer = 3
+
+modelP = GN.graphNetwork(nNin, nopen, nNclose, nlayer)
+modelP.to(device)
 #
-# modelP = GN.graphNetwork(nNin, nopen, nNclose, nlayer)
-# modelP.to(device)
+total_params = sum(p.numel() for p in modelP.parameters())
+print('Number of parameters  for pocket', total_params)
 #
-# total_params = sum(p.numel() for p in modelP.parameters())
-# print('Number of parameters  for pocket', total_params)
+
+#IL, JL, XNL, XEL, score, NL, receptor = getLigData(lig,[2])
+#IP, JP, XNP, XEP, NP                  = getPocketData(pro,[0],receptor[0])
+
+# running the model for the protein
+#nNodesP = XNP.shape[2]
+#GP = GO.graph(IP, JP, nNodesP)
+#xnOutP = modelP(XNP, XEP, GP)
+
+
+# running the model for the ligand
+#nNodesL = XNL.shape[2]
+#GL = GO.graph(IL, JL, nNodesL)
+#xnOutL = modelL(XNL, XEL, GL)
+
 #
-# IP, JP, xnP, xeP, NP = getPocketData(pro,[0,1])
-# nNodesP = xnP.shape[2]
-# GP = GO.graph(IP, JP, nNodesP)
-# xnOutP = modelP(xnP, xeP, GP)
-#
-# s = computeScore(xnOutP, xnOutL, NP, NL)
+#s = computeScore(xnOutP, xnOutL, NP, NL)
+
 
 #### Start Training ####
 
-H = nn.Parameter(torch.ones(1)-6.6126)
+bias = nn.Parameter(torch.ones(1)-6.6126)
 
 #optimizer = optim.Adam([{'params': modelP.K1Nopen, 'lr': lrO},
 #                        {'params': modelP.K2Nopen, 'lr': lrO},
@@ -230,15 +211,14 @@ H = nn.Parameter(torch.ones(1)-6.6126)
 #                        {'params': modelL.KNclose, 'lr': lrC},
 #                        {'params': modelL.Kw, 'lr': lrW}])
 
-ndata = 5000
-batchSize = 1000
-f = 1. #batchSize/ndata
-lrO = 1e-2*f
-lrC = 1e-2*f
-lrW = 1e-2*f
-lrE1 = 1e-2*f
-lrE2 = 1e-2*f
-lrH  = 1e-1*f
+ndata = 32
+batchSize = 16
+lrO = 1e-2
+lrC = 1e-2
+lrW = 1e-2
+lrE1 = 1e-2
+lrE2 = 1e-2
+lrbias = 1e-1
 
 optimizer = optim.Adam([{'params': modelL.K1Nopen, 'lr': lrO},
                        {'params': modelL.K2Nopen, 'lr': lrO},
@@ -246,13 +226,13 @@ optimizer = optim.Adam([{'params': modelL.K1Nopen, 'lr': lrO},
                         {'params': modelL.KE2, 'lr': lrE2},
                        {'params': modelL.KNclose, 'lr': lrC},
                        {'params': modelL.Kw, 'lr': lrW},
-                       {'params': H, 'lr': lrH}])
+                       {'params': bias, 'lr': lrbias}])
 
 
 #optimizer = optim.LBFGS([modelL.K1Nopen, modelL.K2Nopen, modelL.KE1, modelL.KE2, modelL.KNclose, modelL.Kw, H],
 #                        lr=1, max_iter=100)
 
-epochs = 500
+epochs = 30
 
 hist = torch.zeros(epochs)
 
@@ -266,20 +246,32 @@ for j in range(epochs):
     aloss = 0.0
     for i in range(ndata//batchSize):
 
-#        def closure():
         optimizer.zero_grad()
         IND = torch.arange(i * batchSize, (i + 1) * batchSize)
-        # Get the lig data
-        IL, JL, xnL, xeL, truescore, NL = getLigData(lig, IND)
+        # Get the lig network
+        IL, JL, xnL, xeL, truescore, NL, receptor = getLigData(lig, IND)
         nNodesL = xnL.shape[2]
         GL = GO.graph(IL, JL, nNodesL)
-
         optimizer.zero_grad()
         xnOutL = modelL(xnL, xeL, GL)
-        xnOutP = torch.ones(xnOutL.shape)
-        predScore = computeScore(xnOutP, xnOutL, NL, NL, H)
 
-        loss = F.mse_loss(predScore, truescore)  # /F.mse_loss(truescore*0, truescore)
+
+        # get protein data
+        unique_rec = set(receptor)
+        xnOutP = torch.zeros(1, xnOutL.shape[1],0)
+        NP = torch.zeros_like(NL)
+        cnt = 0
+        for kk in receptor: #unique_rec:
+            IP, JP, XNP, XEP, NPi = getPocketData(pro, [0], kk)
+            GP = GO.graph(IP, JP, NPi)
+            xnOutPi = modelP(XNP, XEP, GP)
+            xnOutP = torch.cat((xnOutP,xnOutPi), dim=2)
+            NP[cnt] = NPi
+            cnt += 1
+
+        predScore = computeScore(xnOutP, xnOutL, NP, NL, bias)
+
+        loss = F.mse_loss(predScore, truescore)
         loss.backward()
 #            print(loss.item())
 #            return loss
@@ -312,40 +304,23 @@ for j in range(epochs):
 
     # Validation
 
-    with torch.no_grad():
-        IND = torch.arange(5000, 6000)
-        # Get the lig data
-        IL, JL, xnL, xeL, truescore, NL = getLigData(lig, IND)
-        nNodesL = xnL.shape[2]
-        GL = GO.graph(IL, JL, nNodesL)
-
-        xnOutL = modelL(xnL, xeL, GL)
-        xnOutP = torch.ones(xnOutL.shape)
-        predScore = computeScore(xnOutP, xnOutL, NL, NL, H)
-
-        loss = F.mse_loss(predScore, truescore)  # /F.mse_loss(truescore*0, truescore)
-        print("%2d   %10.3E" % (j, torch.sqrt(loss).item()))
-        print("=========================================================")
+    # with torch.no_grad():
+    #     IND = torch.arange(5000, 6000)
+    #     # Get the lig data
+    #     IL, JL, xnL, xeL, truescore, NL = getLigData(lig, IND)
+    #     nNodesL = xnL.shape[2]
+    #     GL = GO.graph(IL, JL, nNodesL)
+    #
+    #     xnOutL = modelL(xnL, xeL, GL)
+    #     xnOutP = torch.ones(xnOutL.shape)
+    #     predScore = computeScore(xnOutP, xnOutL, NL, NL, H)
+    #
+    #     loss = F.mse_loss(predScore, truescore)  # /F.mse_loss(truescore*0, truescore)
+    #     print("%2d   %10.3E" % (j, torch.sqrt(loss).item()))
+    #     print("=========================================================")
 
 
 #IND = torch.arange(ndata)
-IND = torch.arange(5000,6000)
+#IND = torch.arange(5000,6000)
 
 # Get the lig data
-IL, JL, xnL, xeL, truescore, NL = getLigData(lig, IND)
-nNodesL = xnL.shape[2]
-GL = GO.graph(IL, JL, nNodesL)
-
-xnOutL = modelL(xnL, xeL, GL)
-xnOutP = torch.ones(xnOutL.shape)
-predScore = computeScore(xnOutP, xnOutL, NL, NL, H)
-
-loss = F.mse_loss(predScore, truescore)  # /F.mse_loss(truescore*0, truescore)
-
-tss, ind = torch.sort(truescore)
-plt.plot(predScore[ind].detach())
-plt.plot(tss.detach())
-
-#tss, ind = torch.sort(predScore)
-#plt.plot(truescore[ind].detach())
-#plt.plot(tss.detach())
